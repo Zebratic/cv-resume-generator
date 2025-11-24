@@ -43,6 +43,24 @@ Or use docker-compose:
 docker-compose up -d
 ```
 
+### LXC Container Deployment (Ubuntu 24.04)
+
+One-liner to fully deploy in an LXC container:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Zebratic/cv-resume-generator/main/deploy.sh | sudo bash
+```
+
+This script will:
+- Install Node.js 20.x and PM2
+- Clone the repository
+- Install dependencies and build the application
+- Configure PM2 for production
+- Set up firewall rules
+- Start the application automatically
+
+Access the application at `http://your-container-ip:3000`
+
 ### Proxmox Deployment
 
 1. SSH into your Proxmox node
