@@ -58,13 +58,6 @@ if ! id "$APP_USER" &>/dev/null; then
     useradd -r -s /bin/bash "$APP_USER" || true
 fi
 
-# Create application directory and set ownership
-if [ ! -d "$APP_DIR" ]; then
-    echo -e "${YELLOW}📁 Creating application directory...${NC}"
-    mkdir -p "$APP_DIR"
-fi
-chown -R "$APP_USER:$APP_USER" "$APP_DIR"
-
 # Clone or update repository
 if [ -d "$APP_DIR/.git" ]; then
     echo -e "${YELLOW}🔄 Updating repository...${NC}"
@@ -73,13 +66,23 @@ if [ -d "$APP_DIR/.git" ]; then
     sudo -u "$APP_USER" git reset --hard origin/main
 else
     echo -e "${YELLOW}📥 Cloning repository...${NC}"
-    # Remove directory if it exists but isn't a git repo
+    # Ensure /opt exists
+    mkdir -p /opt
+    # Remove directory if it exists (as root, we have permission)
     if [ -d "$APP_DIR" ]; then
+        echo -e "${YELLOW}🗑️  Removing existing directory...${NC}"
         rm -rf "$APP_DIR"
     fi
-    # Clone as root first, then fix ownership
-    git clone "$REPO_URL" "$APP_DIR"
+    # Clone to a temporary directory first to avoid permission issues
+    TEMP_DIR=$(mktemp -d)
+    echo -e "${YELLOW}📥 Cloning from GitHub to temporary location...${NC}"
+    git clone "$REPO_URL" "$TEMP_DIR/cv-resume-generator"
+    # Move to final location
+    mv "$TEMP_DIR/cv-resume-generator" "$APP_DIR"
+    rmdir "$TEMP_DIR"
+    # Set ownership after moving
     chown -R "$APP_USER:$APP_USER" "$APP_DIR"
+    echo -e "${GREEN}✓ Repository cloned successfully${NC}"
 fi
 
 # Ensure ownership is correct
