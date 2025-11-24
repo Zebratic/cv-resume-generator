@@ -95,7 +95,9 @@ sudo -u "$APP_USER" npm ci --production=false
 
 # Build Next.js application
 echo -e "${YELLOW}🔨 Building Next.js application...${NC}"
-sudo -u "$APP_USER" npm run build
+# Increase Node.js memory limit for build (4GB)
+export NODE_OPTIONS="--max-old-space-size=4096"
+sudo -u "$APP_USER" env NODE_OPTIONS="--max-old-space-size=4096" npm run build
 
 # Stop existing PM2 process if running
 if pm2 list | grep -q "cv-resume-generator"; then
