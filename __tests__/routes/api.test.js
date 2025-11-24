@@ -29,8 +29,7 @@ describe('API Routes', () => {
         degree: 'BS Computer Science',
         institution: 'University',
         location: 'City',
-        year: '2018',
-        gpa: '3.8'
+        year: '2018'
       }
     ],
     skills: ['JavaScript', 'Python'],
@@ -51,77 +50,6 @@ describe('API Routes', () => {
     languages: ['English', 'Spanish']
   };
 
-  test('POST /api/generate should return 200 with valid data', async () => {
-    const response = await request(app)
-      .post('/api/generate')
-      .send(validCvData)
-      .expect(200);
-
-    expect(response.headers['content-type']).toMatch(/application\/zip/);
-    expect(response.body).toBeDefined();
-    expect(Buffer.isBuffer(response.body) || typeof response.body === 'object').toBe(true);
-  }, 10000);
-
-  test('POST /api/generate should return 400 without fullName', async () => {
-    const invalidData = { ...validCvData };
-    delete invalidData.fullName;
-
-    const response = await request(app)
-      .post('/api/generate')
-      .send(invalidData)
-      .expect(400);
-
-    expect(response.body).toHaveProperty('error');
-    expect(response.body.error).toContain('required');
-  });
-
-  test('POST /api/generate should return 400 without email', async () => {
-    const invalidData = { ...validCvData };
-    delete invalidData.email;
-
-    const response = await request(app)
-      .post('/api/generate')
-      .send(invalidData)
-      .expect(400);
-
-    expect(response.body).toHaveProperty('error');
-    expect(response.body.error).toContain('required');
-  });
-
-  test('POST /api/generate should handle minimal data', async () => {
-    const minimalData = {
-      fullName: 'Jane Doe',
-      email: 'jane@example.com'
-    };
-
-    const response = await request(app)
-      .post('/api/generate')
-      .send(minimalData)
-      .expect(200);
-
-    expect(response.headers['content-type']).toMatch(/application\/zip/);
-    expect(response.body).toBeDefined();
-  }, 10000);
-
-  test('POST /api/generate should handle empty arrays', async () => {
-    const dataWithEmptyArrays = {
-      fullName: 'Test User',
-      email: 'test@example.com',
-      experience: [],
-      education: [],
-      projects: [],
-      certifications: []
-    };
-
-    const response = await request(app)
-      .post('/api/generate')
-      .send(dataWithEmptyArrays)
-      .expect(200);
-
-    expect(response.headers['content-type']).toMatch(/application\/zip/);
-    expect(response.body).toBeDefined();
-  }, 10000);
-
   test('POST /api/generate/pdf should return PDF', async () => {
     const response = await request(app)
       .post('/api/generate/pdf')
@@ -129,26 +57,6 @@ describe('API Routes', () => {
       .expect(200);
 
     expect(response.headers['content-type']).toMatch(/application\/pdf/);
-    expect(response.body).toBeDefined();
-  }, 10000);
-
-  test('POST /api/generate/docx should return DOCX', async () => {
-    const response = await request(app)
-      .post('/api/generate/docx')
-      .send(validCvData)
-      .expect(200);
-
-    expect(response.headers['content-type']).toMatch(/wordprocessingml/);
-    expect(response.body).toBeDefined();
-  }, 10000);
-
-  test('POST /api/generate/latex should return LaTeX', async () => {
-    const response = await request(app)
-      .post('/api/generate/latex')
-      .send(validCvData)
-      .expect(200);
-
-    expect(response.headers['content-type']).toMatch(/text\/plain/);
     expect(response.body).toBeDefined();
   }, 10000);
 });

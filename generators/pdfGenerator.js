@@ -1,9 +1,79 @@
 const { getLabel, getProficiencyLabel } = require('../lib/labels');
+const { renderMarkdownText } = require('../lib/markdown-pdf');
+
+/**
+ * Safe wrapper for renderMarkdownText that falls back to plain text on error
+ */
+function safeRenderMarkdown(doc, text, x, y, options = {}) {
+  try {
+    const result = renderMarkdownText(doc, text, x, y, options);
+    // Ensure we got a valid number
+    if (isNaN(result) || result === undefined || result === null) {
+      throw new Error('Invalid Y position returned');
+    }
+    return result;
+  } catch (error) {
+    console.error('Error in safeRenderMarkdown:', error, text);
+    // Fallback to plain text
+    const fontSize = options.fontSize || 10;
+    const width = options.width;
+    doc.font('Helvetica').fontSize(fontSize);
+    if (width) {
+      doc.text(String(text || ''), x, y, { width: width, align: options.align || 'left' });
+      const lines = Math.ceil(String(text || '').length / (width / (fontSize * 0.6)));
+      return y + lines * fontSize * 1.2;
+    } else {
+      doc.text(String(text || ''), x, y);
+      return y + fontSize * 1.2;
+    }
+  }
+}
 
 // Dynamic require to ensure PDFKit loads correctly in Next.js
 function getPDFDocument() {
   const pdfkit = require('pdfkit');
   return pdfkit.default || pdfkit;
+}
+
+/**
+ * Strip Markdown formatting to plain text for PDF generation
+ */
+function markdownToPlainText(markdown) {
+  if (!markdown) return '';
+  
+  // Remove markdown formatting
+  let text = markdown
+    // Remove bold/italic markers
+    .replace(/\*\*\*(.*?)\*\*\*/g, '$1') // Bold italic
+    .replace(/\*\*(.*?)\*\*/g, '$1') // Bold
+    .replace(/\*(.*?)\*/g, '$1') // Italic
+    .replace(/__(.*?)__/g, '$1') // Bold (underscore)
+    .replace(/_(.*?)_/g, '$1') // Italic (underscore)
+    // Remove inline code
+    .replace(/`(.*?)`/g, '$1')
+    // Remove links
+    .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+    // Remove images
+    .replace(/!\[([^\]]*)\]\([^\)]+\)/g, '$1')
+    // Remove headers
+    .replace(/^#{1,6}\s+(.*)$/gm, '$1')
+    // Remove horizontal rules
+    .replace(/^[-*_]{3,}$/gm, '')
+    // Remove list markers
+    .replace(/^[\s]*[-*+]\s+/gm, '')
+    .replace(/^[\s]*\d+\.\s+/gm, '')
+    // Remove blockquotes
+    .replace(/^>\s+/gm, '')
+    // Remove code blocks
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    // Remove HTML tags (for font size spans)
+    .replace(/<[^>]*>/g, '')
+    // Clean up extra whitespace
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  
+  return text;
 }
 
 /**
@@ -78,16 +148,16 @@ function generate(cvData) {
           }
         }
         
-        // Name in sidebar - centered
+        // Name in sidebar - centered with word wrapping
         if (cvData.fullName) {
           doc.fillColor('#ffffff')
-             .fontSize(20)
-             .font('Helvetica-Bold')
-             .text(cvData.fullName, 20, sidebarY, { 
-               width: sidebarWidth - 40,
-               align: 'center'
-             });
-          sidebarY += estimateTextHeight(cvData.fullName, 20, sidebarWidth - 40) + 16;
+             .fontSize(20);
+          sidebarY = safeRenderMarkdown(doc, cvData.fullName, 20, sidebarY, {
+            fontSize: 20,
+            width: sidebarWidth - 40,
+            align: 'center'
+          });
+          sidebarY += 16;
         }
         
         // Current job - centered below name
@@ -122,7 +192,8 @@ function generate(cvData) {
         if (cvData.linkedin) {
           doc.fontSize(11).font('Helvetica-Bold').fillColor('#ffffff').text('LinkedIn:', 20, sidebarY, { width: sidebarWidth - 40 });
           doc.fontSize(9).font('Helvetica').fillColor('#e0e7ff').text(cvData.linkedin, 20, sidebarY + 12, { width: sidebarWidth - 40 });
-          sidebarY += 30;
+          const linkedinHeight = estimateTextHeight(cvData.linkedin, 9, sidebarWidth - 40);
+          sidebarY += 12 + linkedinHeight + 6; // Label height (12) + content height + margin
         }
         if (cvData.website) {
           doc.fontSize(11).font('Helvetica-Bold').fillColor('#ffffff').text('Website:', 20, sidebarY, { width: sidebarWidth - 40 });
@@ -176,12 +247,12 @@ function generate(cvData) {
           doc.moveTo(sidebarWidth + 20, mainY).lineTo(doc.page.width - 20, mainY)
              .strokeColor('#2563eb').lineWidth(2).stroke();
           mainY += 8;
-          doc.fontSize(10).font('Helvetica')
-             .text(cvData.summary, sidebarWidth + 20, mainY, { 
-               width: mainWidth - 40,
-               align: 'justify'
-             });
-          mainY += estimateTextHeight(cvData.summary, 10, mainWidth - 40) + 20;
+          mainY = safeRenderMarkdown(doc, cvData.summary, sidebarWidth + 20, mainY, {
+            fontSize: 10,
+            width: mainWidth - 40,
+            align: 'justify'
+          });
+          mainY += 20;
         }
         
         // Experience
@@ -194,20 +265,30 @@ function generate(cvData) {
              .strokeColor('#2563eb').lineWidth(2).stroke();
           mainY += 8;
           cvData.experience.forEach((exp) => {
-            doc.fontSize(11).font('Helvetica-Bold')
-               .text(exp.title || '', sidebarWidth + 20, mainY);
-            mainY += 15;
-            doc.fontSize(9).font('Helvetica-Oblique')
+            const title = exp.title || '';
+            // If title has markdown, render it; otherwise render directly as bold
+            if (title.includes('**') || title.includes('*') || title.includes('#')) {
+              doc.fontSize(11).font('Helvetica-Bold');
+              mainY = safeRenderMarkdown(doc, title, sidebarWidth + 20, mainY, { fontSize: 11 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(11).font('Helvetica-Bold')
+                 .text(title, sidebarWidth + 20, mainY);
+              mainY += 11 * 1.2;
+            }
+            // Grey italic text for company/location/date
+            doc.fontSize(9).font('Helvetica-Oblique').fillColor('#4B5563')
                .text(`${exp.company || ''}${exp.location ? ' - ' + exp.location : ''}${exp.startDate && exp.endDate ? ' | ' + exp.startDate + ' - ' + exp.endDate : ''}`, 
                      sidebarWidth + 20, mainY)
-               .font('Helvetica');
-            mainY += 12;
+               .font('Helvetica').fillColor('#000000');
+            mainY += 10;
             if (exp.description) {
-              doc.fontSize(9).text(exp.description, sidebarWidth + 20, mainY, { 
+              mainY = safeRenderMarkdown(doc, exp.description, sidebarWidth + 20, mainY, {
+                fontSize: 9,
                 width: mainWidth - 40,
                 align: 'justify'
               });
-              mainY += estimateTextHeight(exp.description, 9, mainWidth - 40) + 10;
+              mainY += 12;
             }
           });
           mainY += 10;
@@ -223,22 +304,32 @@ function generate(cvData) {
              .strokeColor('#2563eb').lineWidth(2).stroke();
           mainY += 8;
           cvData.education.forEach((edu) => {
-            doc.fontSize(11).font('Helvetica-Bold')
-               .text(edu.degree || '', sidebarWidth + 20, mainY);
-            mainY += 15;
-            doc.fontSize(9).font('Helvetica-Oblique')
-               .text(`${edu.institution || ''}${edu.location ? ' - ' + edu.location : ''}${edu.year ? ' | ' + edu.year : ''}${edu.gpa ? ' | ' + getLabel(cvData, 'gpa') + ': ' + edu.gpa : ''}`, 
+            const degree = edu.degree || '';
+            // If degree has markdown, render it; otherwise render directly as bold
+            if (degree.includes('**') || degree.includes('*') || degree.includes('#')) {
+              doc.fontSize(11).font('Helvetica-Bold');
+              mainY = safeRenderMarkdown(doc, degree, sidebarWidth + 20, mainY, { fontSize: 11 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(11).font('Helvetica-Bold')
+                 .text(degree, sidebarWidth + 20, mainY);
+              mainY += 11 * 1.2;
+            }
+            // Grey italic text for institution/location/year
+            doc.fontSize(9).font('Helvetica-Oblique').fillColor('#4B5563')
+               .text(`${edu.institution || ''}${edu.location ? ' - ' + edu.location : ''}${edu.year ? ' | ' + edu.year : ''}`, 
                      sidebarWidth + 20, mainY)
-               .font('Helvetica');
-            mainY += 12;
+               .font('Helvetica').fillColor('#000000');
+            mainY += 10;
             if (edu.description) {
-              doc.fontSize(9).text(edu.description, sidebarWidth + 20, mainY, { 
+              mainY = safeRenderMarkdown(doc, edu.description, sidebarWidth + 20, mainY, {
+                fontSize: 9,
                 width: mainWidth - 40,
                 align: 'left'
               });
-              mainY += estimateTextHeight(edu.description, 9, mainWidth - 40) + 8;
+              mainY += 10;
             }
-            mainY += 8;
+            mainY += 6;
           });
         }
         
@@ -252,21 +343,30 @@ function generate(cvData) {
              .strokeColor('#2563eb').lineWidth(2).stroke();
           mainY += 8;
           cvData.projects.forEach((project) => {
-            doc.fontSize(11).font('Helvetica-Bold')
-               .text(project.name || '', sidebarWidth + 20, mainY);
-            mainY += 15;
+            const name = project.name || '';
+            // If name has markdown, render it; otherwise render directly as bold
+            if (name.includes('**') || name.includes('*') || name.includes('#')) {
+              doc.fontSize(11).font('Helvetica-Bold');
+              mainY = safeRenderMarkdown(doc, name, sidebarWidth + 20, mainY, { fontSize: 11 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(11).font('Helvetica-Bold')
+                 .text(name, sidebarWidth + 20, mainY);
+              mainY += 11 * 1.2;
+            }
             if (project.technologies) {
-              doc.fontSize(9).font('Helvetica-Oblique')
+              doc.fontSize(9).font('Helvetica-Oblique').fillColor('#4B5563')
                  .text(`${getLabel(cvData, 'technologies')}: ${project.technologies}`, sidebarWidth + 20, mainY)
-                 .font('Helvetica');
-              mainY += 12;
+                 .font('Helvetica').fillColor('#000000');
+              mainY += 10;
             }
             if (project.description) {
-              doc.fontSize(9).font('Helvetica').text(project.description, sidebarWidth + 20, mainY, { 
+              mainY = safeRenderMarkdown(doc, project.description, sidebarWidth + 20, mainY, {
+                fontSize: 9,
                 width: mainWidth - 40,
                 align: 'justify'
               });
-              mainY += estimateTextHeight(project.description, 9, mainWidth - 40) + 10;
+              mainY += 10;
             }
           });
         }
@@ -320,8 +420,8 @@ function generate(cvData) {
           }
         }
         
-        doc.fontSize(28).font('Helvetica-Bold')
-           .text(cvData.fullName || '', cvData.profilePhoto ? 170 : 50, y);
+        doc.fontSize(28);
+        y = safeRenderMarkdown(doc, cvData.fullName || '', cvData.profilePhoto ? 170 : 50, y, { fontSize: 28 });
         y += 35;
         
         if (cvData.currentJob) {
@@ -341,9 +441,12 @@ function generate(cvData) {
           doc.fontSize(16).font('Helvetica-Bold')
              .text(getLabel(cvData, 'professionalSummary'), 50, y);
           y += 20;
-          doc.fontSize(10).font('Helvetica')
-             .text(cvData.summary, 50, y, { width: 500, align: 'justify' });
-          y += estimateTextHeight(cvData.summary, 10, 500) + 25;
+          y = safeRenderMarkdown(doc, cvData.summary, 50, y, {
+            fontSize: 10,
+            width: 500,
+            align: 'justify'
+          });
+          y += 25;
         }
         
         // Two column layout
@@ -359,17 +462,28 @@ function generate(cvData) {
              .text(getLabel(cvData, 'workExperience'), col1X, col1Y);
           col1Y += 20;
           cvData.experience.forEach((exp) => {
-            doc.fontSize(11).font('Helvetica-Bold')
-               .text(exp.title || '', col1X, col1Y);
-            col1Y += 15;
-            doc.fontSize(9).font('Helvetica-Oblique')
+            const title = exp.title || '';
+            if (title.includes('**') || title.includes('*') || title.includes('#')) {
+              doc.fontSize(11).font('Helvetica-Bold');
+              col1Y = safeRenderMarkdown(doc, title, col1X, col1Y, { fontSize: 11 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(11).font('Helvetica-Bold')
+                 .text(title, col1X, col1Y);
+              col1Y += 11 * 1.2;
+            }
+            doc.fontSize(9).font('Helvetica-Oblique').fillColor('#4B5563')
                .text(`${exp.company || ''}${exp.location ? ' • ' + exp.location : ''}${exp.startDate && exp.endDate ? ' • ' + exp.startDate + ' - ' + exp.endDate : ''}`, 
                      col1X, col1Y, { width: colWidth })
-               .font('Helvetica');
-            col1Y += 12;
+               .font('Helvetica').fillColor('#000000');
+            col1Y += 10;
             if (exp.description) {
-              doc.fontSize(9).text(exp.description, col1X, col1Y, { width: colWidth, align: 'justify' });
-              col1Y += estimateTextHeight(exp.description, 9, colWidth) + 10;
+              col1Y = safeRenderMarkdown(doc, exp.description, col1X, col1Y, {
+                fontSize: 9,
+                width: colWidth,
+                align: 'justify'
+              });
+              col1Y += 10;
             }
           });
           col1Y += 15;
@@ -380,17 +494,28 @@ function generate(cvData) {
              .text(getLabel(cvData, 'education'), col1X, col1Y);
           col1Y += 20;
           cvData.education.forEach((edu) => {
-            doc.fontSize(11).font('Helvetica-Bold')
-               .text(edu.degree || '', col1X, col1Y);
-            col1Y += 15;
-            doc.fontSize(9).font('Helvetica-Oblique')
-               .text(`${edu.institution || ''}${edu.location ? ' • ' + edu.location : ''}${edu.year ? ' • ' + edu.year : ''}${edu.gpa ? ' • ' + getLabel(cvData, 'gpa') + ': ' + edu.gpa : ''}`, 
+            const degree = edu.degree || '';
+            if (degree.includes('**') || degree.includes('*') || degree.includes('#')) {
+              doc.fontSize(11).font('Helvetica-Bold');
+              col1Y = safeRenderMarkdown(doc, degree, col1X, col1Y, { fontSize: 11 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(11).font('Helvetica-Bold')
+                 .text(degree, col1X, col1Y);
+              col1Y += 11 * 1.2;
+            }
+            doc.fontSize(9).font('Helvetica-Oblique').fillColor('#4B5563')
+               .text(`${edu.institution || ''}${edu.location ? ' • ' + edu.location : ''}${edu.year ? ' • ' + edu.year : ''}`, 
                      col1X, col1Y, { width: colWidth })
-               .font('Helvetica');
-            col1Y += 12;
+               .font('Helvetica').fillColor('#000000');
+            col1Y += 10;
             if (edu.description) {
-              doc.fontSize(9).text(edu.description, col1X, col1Y, { width: colWidth, align: 'justify' });
-              col1Y += estimateTextHeight(edu.description, 9, colWidth) + 8;
+              col1Y = safeRenderMarkdown(doc, edu.description, col1X, col1Y, {
+                fontSize: 9,
+                width: colWidth,
+                align: 'justify'
+              });
+              col1Y += 8;
             }
             col1Y += 8;
           });
@@ -411,18 +536,29 @@ function generate(cvData) {
              .text(getLabel(cvData, 'projects'), col2X, col2Y);
           col2Y += 20;
           cvData.projects.forEach((project) => {
-            doc.fontSize(11).font('Helvetica-Bold')
-               .text(project.name || '', col2X, col2Y);
-            col2Y += 15;
+            const name = project.name || '';
+            if (name.includes('**') || name.includes('*') || name.includes('#')) {
+              doc.fontSize(11).font('Helvetica-Bold');
+              col2Y = safeRenderMarkdown(doc, name, col2X, col2Y, { fontSize: 11 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(11).font('Helvetica-Bold')
+                 .text(name, col2X, col2Y);
+              col2Y += 11 * 1.2;
+            }
             if (project.technologies) {
-              doc.fontSize(9).font('Helvetica-Oblique')
+              doc.fontSize(9).font('Helvetica-Oblique').fillColor('#4B5563')
                  .text(`${getLabel(cvData, 'technologies')}: ${project.technologies}`, col2X, col2Y, { width: colWidth })
-                 .font('Helvetica');
-              col2Y += 12;
+                 .font('Helvetica').fillColor('#000000');
+              col2Y += 10;
             }
             if (project.description) {
-              doc.fontSize(9).font('Helvetica').text(project.description, col2X, col2Y, { width: colWidth, align: 'justify' });
-              col2Y += estimateTextHeight(project.description, 9, colWidth) + 10;
+              col2Y = safeRenderMarkdown(doc, project.description, col2X, col2Y, {
+                fontSize: 9,
+                width: colWidth,
+                align: 'justify'
+              });
+              col2Y += 10;
             }
           });
           col2Y += 15;
@@ -434,7 +570,7 @@ function generate(cvData) {
           col2Y += 20;
           cvData.certifications.forEach((cert) => {
             doc.fontSize(9).font('Helvetica')
-               .text(`${cert.name || ''}${cert.issuer ? ' - ' + cert.issuer : ''}${cert.date ? ' (' + cert.date + ')' : ''}`, 
+               .text(`${markdownToPlainText(cert.name || '')}${cert.issuer ? ' - ' + cert.issuer : ''}${cert.date ? ' (' + cert.date + ')' : ''}`, 
                      col2X, col2Y, { width: colWidth });
             col2Y += 15;
           });
@@ -457,8 +593,8 @@ function generate(cvData) {
         doc.fontSize(9);
         
         // Header
-        doc.fontSize(18).font('Helvetica-Bold')
-           .text(cvData.fullName || '', { align: 'center', y: y });
+        doc.fontSize(18);
+        y = safeRenderMarkdown(doc, cvData.fullName || '', doc.page.width / 2, y, { fontSize: 18, align: 'center' });
         y += 15;
         
         const contactInfo = [
@@ -487,9 +623,12 @@ function generate(cvData) {
           doc.fontSize(10).font('Helvetica-Bold')
              .text(getLabel(cvData, 'professionalSummary'), col1X, col1Y);
           col1Y += 12;
-          doc.fontSize(8).font('Helvetica')
-             .text(cvData.summary, col1X, col1Y, { width: 500, align: 'justify' });
-          col1Y += estimateTextHeight(cvData.summary, 8, 500) + 15;
+          col1Y = safeRenderMarkdown(doc, cvData.summary, col1X, col1Y, {
+            fontSize: 8,
+            width: 500,
+            align: 'justify'
+          });
+          col1Y += 15;
           col2Y = col1Y;
         }
         
@@ -499,16 +638,28 @@ function generate(cvData) {
              .text(getLabel(cvData, 'workExperience'), col1X, col1Y);
           col1Y += 12;
           cvData.experience.forEach((exp) => {
-            doc.fontSize(9).font('Helvetica-Bold')
-               .text(exp.title || '', col1X, col1Y);
-            col1Y += 10;
+            const title = exp.title || '';
+            if (title.includes('**') || title.includes('*') || title.includes('#')) {
+              doc.fontSize(9).font('Helvetica-Bold');
+              col1Y = safeRenderMarkdown(doc, title, col1X, col1Y, { fontSize: 9 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(9).font('Helvetica-Bold')
+                 .text(title, col1X, col1Y);
+              col1Y += 9 * 1.2;
+            }
+            col1Y += 2;
             doc.fontSize(7).font('Helvetica')
                .text(`${exp.company || ''}${exp.startDate && exp.endDate ? ', ' + exp.startDate + '-' + exp.endDate : ''}`, 
                      col1X, col1Y, { width: colWidth });
             col1Y += 9;
             if (exp.description) {
-              doc.fontSize(7).text(exp.description, col1X, col1Y, { width: colWidth, align: 'justify' });
-              col1Y += estimateTextHeight(exp.description, 7, colWidth) + 8;
+              col1Y = safeRenderMarkdown(doc, exp.description, col1X, col1Y, {
+                fontSize: 7,
+                width: colWidth,
+                align: 'justify'
+              });
+              col1Y += 8;
             }
           });
           col1Y += 10;
@@ -519,16 +670,27 @@ function generate(cvData) {
              .text(getLabel(cvData, 'education'), col1X, col1Y);
           col1Y += 12;
           cvData.education.forEach((edu) => {
-            doc.fontSize(9).font('Helvetica-Bold')
-               .text(edu.degree || '', col1X, col1Y);
-            col1Y += 10;
+            const degree = edu.degree || '';
+            if (degree.includes('**') || degree.includes('*') || degree.includes('#')) {
+              doc.fontSize(9).font('Helvetica-Bold');
+              col1Y = safeRenderMarkdown(doc, degree, col1X, col1Y, { fontSize: 9 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(9).font('Helvetica-Bold')
+                 .text(degree, col1X, col1Y);
+              col1Y += 9 * 1.2;
+            }
+            col1Y += 2;
             doc.fontSize(7).font('Helvetica')
                .text(`${edu.institution || ''}${edu.year ? ', ' + edu.year : ''}`, 
                      col1X, col1Y, { width: colWidth });
             col1Y += 10;
             if (edu.description) {
-              doc.fontSize(7).text(edu.description, col1X, col1Y, { width: colWidth });
-              col1Y += estimateTextHeight(edu.description, 7, colWidth) + 5;
+              col1Y = safeRenderMarkdown(doc, edu.description, col1X, col1Y, {
+                fontSize: 7,
+                width: colWidth
+              });
+              col1Y += 5;
             }
             col1Y += 5;
           });
@@ -549,12 +711,24 @@ function generate(cvData) {
              .text(getLabel(cvData, 'projects'), col2X, col2Y);
           col2Y += 12;
           cvData.projects.forEach((project) => {
-            doc.fontSize(9).font('Helvetica-Bold')
-               .text(project.name || '', col2X, col2Y);
-            col2Y += 10;
+            const name = project.name || '';
+            if (name.includes('**') || name.includes('*') || name.includes('#')) {
+              doc.fontSize(9).font('Helvetica-Bold');
+              col2Y = safeRenderMarkdown(doc, name, col2X, col2Y, { fontSize: 9 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(9).font('Helvetica-Bold')
+                 .text(name, col2X, col2Y);
+              col2Y += 9 * 1.2;
+            }
+            col2Y += 4;
             if (project.description) {
-              doc.fontSize(7).text(project.description, col2X, col2Y, { width: colWidth, align: 'justify' });
-              col2Y += estimateTextHeight(project.description, 7, colWidth) + 8;
+              col2Y = safeRenderMarkdown(doc, project.description, col2X, col2Y, {
+                fontSize: 7,
+                width: colWidth,
+                align: 'justify'
+              });
+              col2Y += 8;
             }
           });
           col2Y += 10;
@@ -566,7 +740,7 @@ function generate(cvData) {
           col2Y += 12;
           cvData.certifications.forEach((cert) => {
             doc.fontSize(7).font('Helvetica')
-               .text(`${cert.name || ''}${cert.date ? ' (' + cert.date + ')' : ''}`, 
+               .text(`${markdownToPlainText(cert.name || '')}${cert.date ? ' (' + cert.date + ')' : ''}`, 
                      col2X, col2Y, { width: colWidth });
             col2Y += 10;
           });
@@ -619,8 +793,8 @@ function generate(cvData) {
         }
         
         // Header
-        doc.fontSize(24).font('Helvetica-Bold')
-           .text(cvData.fullName || '', { align: 'center', y: y });
+        doc.fontSize(24);
+        y = safeRenderMarkdown(doc, cvData.fullName || '', doc.page.width / 2, y, { fontSize: 24, align: 'center' });
         y += 30;
         
         // Contact Information
@@ -640,8 +814,12 @@ function generate(cvData) {
         if (cvData.summary) {
           doc.fontSize(14).font('Helvetica-Bold').text(getLabel(cvData, 'professionalSummary'), { underline: true, y: y });
           y += 20;
-          doc.fontSize(11).font('Helvetica').text(cvData.summary, { y: y, width: 500, align: 'justify' });
-          y += estimateTextHeight(cvData.summary, 11, 500) + 20;
+          y = safeRenderMarkdown(doc, cvData.summary, 50, y, {
+            fontSize: 11,
+            width: 500,
+            align: 'justify'
+          });
+          y += 20;
         }
 
         // Work Experience
@@ -650,13 +828,27 @@ function generate(cvData) {
           y += 20;
           cvData.experience.forEach((exp, index) => {
             if (index > 0) y += 10;
-            doc.fontSize(12).font('Helvetica-Bold').text(exp.title || '', { y: y });
-            y += 15;
-            doc.fontSize(10).font('Helvetica-Oblique').text(`${exp.company || ''}${exp.location ? ' - ' + exp.location : ''}${exp.startDate && exp.endDate ? ' | ' + exp.startDate + ' - ' + exp.endDate : ''}`, { y: y }).font('Helvetica');
-            y += 12;
+            const title = exp.title || '';
+            if (title.includes('**') || title.includes('*') || title.includes('#')) {
+              doc.fontSize(12).font('Helvetica-Bold');
+              y = safeRenderMarkdown(doc, title, 50, y, { fontSize: 12 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(12).font('Helvetica-Bold')
+                 .text(title, 50, y);
+              y += 12 * 1.2;
+            }
+            doc.fontSize(10).font('Helvetica-Oblique').fillColor('#4B5563')
+               .text(`${exp.company || ''}${exp.location ? ' - ' + exp.location : ''}${exp.startDate && exp.endDate ? ' | ' + exp.startDate + ' - ' + exp.endDate : ''}`, { y: y })
+               .font('Helvetica').fillColor('#000000');
+            y += 10;
             if (exp.description) {
-              doc.fontSize(10).text(exp.description, { y: y, width: 500, align: 'justify' });
-              y += estimateTextHeight(exp.description, 10, 500) + 10;
+              y = safeRenderMarkdown(doc, exp.description, 50, y, {
+                fontSize: 10,
+                width: 500,
+                align: 'justify'
+              });
+              y += 10;
             }
           });
           y += 10;
@@ -668,17 +860,27 @@ function generate(cvData) {
           y += 20;
           cvData.education.forEach((edu, index) => {
             if (index > 0) y += 10;
-            doc.fontSize(12).font('Helvetica-Bold').text(edu.degree || '', { y: y });
-            y += 15;
-            doc.fontSize(10).font('Helvetica-Oblique').text(`${edu.institution || ''}${edu.location ? ' - ' + edu.location : ''}${edu.year ? ' | ' + edu.year : ''}`, { y: y }).font('Helvetica');
-            y += 12;
-            if (edu.gpa) {
-              doc.fontSize(10).text(`${getLabel(cvData, 'gpa')}: ${edu.gpa}`, { y: y });
-              y += 12;
+            const degree = edu.degree || '';
+            if (degree.includes('**') || degree.includes('*') || degree.includes('#')) {
+              doc.fontSize(12).font('Helvetica-Bold');
+              y = safeRenderMarkdown(doc, degree, 50, y, { fontSize: 12 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(12).font('Helvetica-Bold')
+                 .text(degree, 50, y);
+              y += 12 * 1.2;
             }
+            doc.fontSize(10).font('Helvetica-Oblique').fillColor('#4B5563')
+               .text(`${edu.institution || ''}${edu.location ? ' - ' + edu.location : ''}${edu.year ? ' | ' + edu.year : ''}`, { y: y })
+               .font('Helvetica').fillColor('#000000');
+            y += 10;
             if (edu.description) {
-              doc.fontSize(10).text(edu.description, { y: y, width: 500, align: 'justify' });
-              y += estimateTextHeight(edu.description, 10, 500) + 10;
+              y = safeRenderMarkdown(doc, edu.description, 50, y, {
+                fontSize: 10,
+                width: 500,
+                align: 'justify'
+              });
+              y += 10;
             }
           });
           y += 10;
@@ -698,15 +900,30 @@ function generate(cvData) {
           y += 20;
           cvData.projects.forEach((project, index) => {
             if (index > 0) y += 10;
-            doc.fontSize(12).font('Helvetica-Bold').text(project.name || '', { y: y });
-            y += 15;
+            const name = project.name || '';
+            if (name.includes('**') || name.includes('*') || name.includes('#')) {
+              doc.fontSize(12).font('Helvetica-Bold');
+              y = safeRenderMarkdown(doc, name, 50, y, { fontSize: 12 });
+              doc.font('Helvetica');
+            } else {
+              doc.fontSize(12).font('Helvetica-Bold')
+                 .text(name, 50, y);
+              y += 12 * 1.2;
+            }
+            y += 6;
             if (project.technologies) {
-              doc.fontSize(10).font('Helvetica-Oblique').text(`${getLabel(cvData, 'technologies')}: ${project.technologies}`, { y: y }).font('Helvetica');
-              y += 12;
+              doc.fontSize(10).font('Helvetica-Oblique').fillColor('#4B5563')
+                 .text(`${getLabel(cvData, 'technologies')}: ${project.technologies}`, { y: y })
+                 .font('Helvetica').fillColor('#000000');
+              y += 10;
             }
             if (project.description) {
-              doc.fontSize(10).font('Helvetica').text(project.description, { y: y, width: 500, align: 'justify' });
-              y += estimateTextHeight(project.description, 10, 500) + 10;
+              y = safeRenderMarkdown(doc, project.description, 50, y, {
+                fontSize: 10,
+                width: 500,
+                align: 'justify'
+              });
+              y += 10;
             }
           });
           y += 10;
@@ -717,7 +934,7 @@ function generate(cvData) {
           doc.fontSize(14).font('Helvetica-Bold').text(getLabel(cvData, 'certifications'), { underline: true, y: y });
           y += 20;
           cvData.certifications.forEach((cert) => {
-            doc.fontSize(10).font('Helvetica').text(`${cert.name || ''}${cert.issuer ? ' - ' + cert.issuer : ''}${cert.date ? ' (' + cert.date + ')' : ''}`, { y: y });
+            doc.fontSize(10).font('Helvetica').text(`${markdownToPlainText(cert.name || '')}${cert.issuer ? ' - ' + cert.issuer : ''}${cert.date ? ' (' + cert.date + ')' : ''}`, { y: y });
             y += 15;
           });
           y += 10;

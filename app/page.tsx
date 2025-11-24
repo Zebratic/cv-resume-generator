@@ -5,6 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { RichTextEditor } from '@/components/ui/rich-text-editor';
+import { StyledInput } from '@/components/ui/styled-input';
+import { markdownToHtml, markdownToPlainText } from '@/lib/markdown';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -35,7 +38,6 @@ interface CvData {
     phone: string;
     address: string;
     technologies: string;
-    gpa: string;
   };
   experience: Array<{
     title: string;
@@ -50,7 +52,6 @@ interface CvData {
     institution: string;
     location: string;
     year: string;
-    gpa: string;
     description: string;
   }>;
   skills: string;
@@ -91,7 +92,6 @@ const translations: Record<string, Record<string, string>> = {
     phone: 'Phone',
     address: 'Address',
     technologies: 'Technologies',
-    gpa: 'GPA',
     native: 'Native',
     fluent: 'Fluent',
     advanced: 'Advanced',
@@ -112,7 +112,6 @@ const translations: Record<string, Record<string, string>> = {
     phone: 'Telefon',
     address: 'Adresse',
     technologies: 'Teknologier',
-    gpa: 'Gennemsnit',
     native: 'Modersmål',
     fluent: 'Flydende',
     advanced: 'Avanceret',
@@ -133,7 +132,6 @@ const translations: Record<string, Record<string, string>> = {
     phone: 'Telefon',
     address: 'Adresse',
     technologies: 'Technologien',
-    gpa: 'Durchschnitt',
     native: 'Muttersprache',
     fluent: 'Fließend',
     advanced: 'Fortgeschritten',
@@ -223,7 +221,6 @@ const initialCvData: CvData = {
     phone: '',
     address: '',
     technologies: '',
-    gpa: '',
   },
   experience: [],
   education: [],
@@ -235,7 +232,6 @@ const initialCvData: CvData = {
 
 export default function Home() {
   const [cvData, setCvData] = useState<CvData>(initialCvData);
-  const [isGenerating, setIsGenerating] = useState(false);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -327,7 +323,6 @@ export default function Home() {
           institution: 'University of California',
           location: 'Berkeley, CA',
           year: '2018',
-          gpa: '3.8/4.0',
           description: ''
         }
       ],
@@ -421,48 +416,6 @@ export default function Home() {
     setCvData(initialCvData);
   };
 
-  const generateCV = async () => {
-    if (!cvData.fullName || !cvData.email) {
-      toast.error('Please fill in Full Name and Email (required fields)');
-      return;
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cvData.email)) {
-      toast.error('Please enter a valid email address');
-      return;
-    }
-
-    setIsGenerating(true);
-    try {
-      const response = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...cvData,
-          skills: cvData.skills.split(',').map(s => s.trim()).filter(s => s)
-        })
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Generation failed');
-      }
-
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${cvData.fullName.replace(/\s+/g, '_')}_CV.zip`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast.success('CV generated successfully!');
-    } catch (error) {
-      toast.error('Error: ' + (error as Error).message);
-    } finally {
-      setIsGenerating(false);
-    }
-  };
-
   const downloadFile = async (format: string) => {
     if (!cvData.fullName || !cvData.email) {
       toast.error('Please fill in at least Full Name and Email');
@@ -485,7 +438,9 @@ export default function Home() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `${cvData.fullName.replace(/\s+/g, '_')}_CV.${format}`;
+      // Strip Markdown and HTML tags from filename
+      const cleanName = markdownToPlainText(cvData.fullName).replace(/\s+/g, '_');
+      a.download = `${cleanName}_CV.${format}`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -544,14 +499,6 @@ export default function Home() {
             </Select>
           </div>
           <div className="flex items-center gap-2 ml-4 border-l pl-4">
-            <Button
-              onClick={generateCV}
-              disabled={isGenerating}
-              size="sm"
-              className="bg-primary"
-            >
-              {isGenerating ? 'Generating...' : 'Generate All'}
-            </Button>
             <Label className="text-sm text-muted-foreground">Export:</Label>
             <Button
               variant="outline"
@@ -560,20 +507,6 @@ export default function Home() {
             >
               <Download className="mr-2 h-4 w-4" /> PDF
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => downloadFile('docx')}
-            >
-              <Download className="mr-2 h-4 w-4" /> DOCX
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => downloadFile('latex')}
-            >
-              <Download className="mr-2 h-4 w-4" /> LaTeX
-            </Button>
           </div>
         </div>
 
@@ -581,11 +514,14 @@ export default function Home() {
           {/* Form Column */}
           <div>
             <Tabs defaultValue="basic" className="w-full">
-              <TabsList className="grid w-full grid-cols-6 mb-4">
+              <TabsList className="!grid w-full grid-cols-5 mb-4 gap-1 h-auto">
                 <TabsTrigger value="basic">Basic</TabsTrigger>
                 <TabsTrigger value="experience">Experience</TabsTrigger>
                 <TabsTrigger value="education">Education</TabsTrigger>
                 <TabsTrigger value="skills">Skills</TabsTrigger>
+                <TabsTrigger value="languages">Languages</TabsTrigger>
+                <TabsTrigger value="projects">Projects</TabsTrigger>
+                <TabsTrigger value="certifications">Certifications</TabsTrigger>
                 <TabsTrigger value="labels">Labels</TabsTrigger>
                 <TabsTrigger value="styling">Styling</TabsTrigger>
               </TabsList>
@@ -634,11 +570,12 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="fullName">Full Name *</Label>
-                  <Input
+                  <StyledInput
                     id="fullName"
                     value={cvData.fullName}
-                    onChange={(e) => updateField('fullName', e.target.value)}
+                    onChange={(value) => updateField('fullName', value)}
+                    label="Full Name *"
+                    showStyleControls={true}
                     required
                   />
                 </div>
@@ -699,12 +636,12 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="summary">Professional Summary</Label>
-                  <Textarea
-                    id="summary"
+                  <RichTextEditor
                     value={cvData.summary}
-                    onChange={(e) => updateField('summary', e.target.value)}
+                    onChange={(value) => updateField('summary', value)}
+                    placeholder="Enter your professional summary..."
                     rows={4}
+                    label="Professional Summary"
                   />
                 </div>
                   </CardContent>
@@ -734,14 +671,15 @@ export default function Home() {
                       </Button>
                       <div className="space-y-4">
                         <div className="space-y-2">
-                          <Label>Job Title</Label>
-                          <Input
+                          <StyledInput
                             value={exp.title}
-                            onChange={(e) => {
+                            onChange={(value) => {
                               const newExp = [...cvData.experience];
-                              newExp[index].title = e.target.value;
+                              newExp[index].title = value;
                               updateField('experience', newExp);
                             }}
+                            label="Job Title"
+                            showStyleControls={true}
                           />
                         </div>
                         <div className="grid grid-cols-2 gap-4">
@@ -793,15 +731,16 @@ export default function Home() {
                           </div>
                         </div>
                         <div className="space-y-2">
-                          <Label>Description</Label>
-                          <Textarea
+                          <RichTextEditor
                             value={exp.description}
-                            onChange={(e) => {
+                            onChange={(value) => {
                               const newExp = [...cvData.experience];
-                              newExp[index].description = e.target.value;
+                              newExp[index].description = value;
                               updateField('experience', newExp);
                             }}
+                            placeholder="Enter job description..."
                             rows={3}
+                            label="Description"
                           />
                         </div>
                       </div>
@@ -846,14 +785,15 @@ export default function Home() {
                       </Button>
                       <div className="space-y-4">
                         <div className="space-y-2">
-                          <Label>Degree</Label>
-                          <Input
+                          <StyledInput
                             value={edu.degree}
-                            onChange={(e) => {
+                            onChange={(value) => {
                               const newEdu = [...cvData.education];
-                              newEdu[index].degree = e.target.value;
+                              newEdu[index].degree = value;
                               updateField('education', newEdu);
                             }}
+                            label="Degree"
+                            showStyleControls={true}
                           />
                         </div>
                         <div className="grid grid-cols-2 gap-4">
@@ -892,28 +832,18 @@ export default function Home() {
                               }}
                             />
                           </div>
-                          <div className="space-y-2">
-                            <Label>GPA</Label>
-                            <Input
-                              value={edu.gpa}
-                              onChange={(e) => {
-                                const newEdu = [...cvData.education];
-                                newEdu[index].gpa = e.target.value;
-                                updateField('education', newEdu);
-                              }}
-                            />
-                          </div>
                         </div>
                         <div className="space-y-2">
-                          <Label>Description</Label>
-                          <Textarea
+                          <RichTextEditor
                             value={edu.description || ''}
-                            onChange={(e) => {
+                            onChange={(value) => {
                               const newEdu = [...cvData.education];
-                              newEdu[index].description = e.target.value;
+                              newEdu[index].description = value;
                               updateField('education', newEdu);
                             }}
+                            placeholder="Enter education description..."
                             rows={3}
+                            label="Description"
                           />
                         </div>
                       </div>
@@ -925,7 +855,7 @@ export default function Home() {
                   onClick={() => {
                     updateField('education', [
                       ...cvData.education,
-                      { degree: '', institution: '', location: '', year: '', gpa: '', description: '' }
+                      { degree: '', institution: '', location: '', year: '', description: '' }
                     ]);
                   }}
                 >
@@ -936,282 +866,251 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="skills">
-                <div className="space-y-6">
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Skills</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-2">
-                        <Label htmlFor="skills">Skills (comma-separated)</Label>
-                        <Input
-                          id="skills"
-                          value={cvData.skills}
-                          onChange={(e) => updateField('skills', e.target.value)}
-                          placeholder="e.g., JavaScript, Python, React"
-                        />
-                      </div>
-                    </CardContent>
-                  </Card>
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Skills</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-2">
+                      <Label htmlFor="skills">Skills (comma-separated)</Label>
+                      <Input
+                        id="skills"
+                        value={cvData.skills}
+                        onChange={(e) => updateField('skills', e.target.value)}
+                        placeholder="e.g., JavaScript, Python, React"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Languages</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      {cvData.languages.map((lang, index) => (
-                        <Card key={index} className="relative">
-                          <CardContent className="pt-6">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="absolute top-2 right-2"
-                              onClick={() => {
-                                const newLangs = [...cvData.languages];
-                                newLangs.splice(index, 1);
-                                updateField('languages', newLangs);
-                              }}
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
+              <TabsContent value="languages">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Languages</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {cvData.languages.map((lang, index) => (
+                      <Card key={index} className="relative">
+                        <CardContent className="pt-6">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="absolute top-2 right-2"
+                            onClick={() => {
+                              const newLangs = [...cvData.languages];
+                              newLangs.splice(index, 1);
+                              updateField('languages', newLangs);
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>Language</Label>
+                              <Input
+                                value={lang.name}
+                                onChange={(e) => {
+                                  const newLangs = [...cvData.languages];
+                                  newLangs[index].name = e.target.value;
+                                  updateField('languages', newLangs);
+                                }}
+                                placeholder="e.g., English"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Proficiency Level</Label>
+                              <Select
+                                value={lang.level}
+                                onValueChange={(value) => {
+                                  const newLangs = [...cvData.languages];
+                                  newLangs[index].level = value;
+                                  updateField('languages', newLangs);
+                                }}
+                              >
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Select level" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {getProficiencyLevels(cvData).map((level) => (
+                                    <SelectItem key={level.value} value={level.value}>
+                                      {level.label}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        updateField('languages', [
+                          ...cvData.languages,
+                          { name: '', level: '' }
+                        ]);
+                      }}
+                    >
+                      <Plus className="mr-2 h-4 w-4" /> Add Language
+                    </Button>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="projects">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Projects</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {cvData.projects.map((proj, index) => (
+                      <Card key={index} className="relative">
+                        <CardContent className="pt-6">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="absolute top-2 right-2"
+                            onClick={() => {
+                              const newProj = [...cvData.projects];
+                              newProj.splice(index, 1);
+                              updateField('projects', newProj);
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <StyledInput
+                                value={proj.name}
+                                onChange={(value) => {
+                                  const newProj = [...cvData.projects];
+                                  newProj[index].name = value;
+                                  updateField('projects', newProj);
+                                }}
+                                label="Project Name"
+                                showStyleControls={true}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Technologies</Label>
+                              <Input
+                                value={proj.technologies}
+                                onChange={(e) => {
+                                  const newProj = [...cvData.projects];
+                                  newProj[index].technologies = e.target.value;
+                                  updateField('projects', newProj);
+                                }}
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <RichTextEditor
+                                value={proj.description}
+                                onChange={(value) => {
+                                  const newProj = [...cvData.projects];
+                                  newProj[index].description = value;
+                                  updateField('projects', newProj);
+                                }}
+                                placeholder="Enter project description..."
+                                rows={3}
+                                label="Description"
+                              />
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        updateField('projects', [
+                          ...cvData.projects,
+                          { name: '', technologies: '', description: '' }
+                        ]);
+                      }}
+                    >
+                      <Plus className="mr-2 h-4 w-4" /> Add Project
+                    </Button>
+                  </CardContent>
+                </Card>
+              </TabsContent>
+
+              <TabsContent value="certifications">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Certifications</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {cvData.certifications.map((cert, index) => (
+                      <Card key={index} className="relative">
+                        <CardContent className="pt-6">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="absolute top-2 right-2"
+                            onClick={() => {
+                              const newCert = [...cvData.certifications];
+                              newCert.splice(index, 1);
+                              updateField('certifications', newCert);
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                          <div className="space-y-4">
+                            <div className="space-y-2">
+                              <StyledInput
+                                value={cert.name}
+                                onChange={(value) => {
+                                  const newCert = [...cvData.certifications];
+                                  newCert[index].name = value;
+                                  updateField('certifications', newCert);
+                                }}
+                                label="Certification Name"
+                                showStyleControls={true}
+                              />
+                            </div>
                             <div className="grid grid-cols-2 gap-4">
                               <div className="space-y-2">
-                                <Label>Language</Label>
+                                <Label>Issuer</Label>
                                 <Input
-                                  value={lang.name}
+                                  value={cert.issuer}
                                   onChange={(e) => {
-                                    const newLangs = [...cvData.languages];
-                                    newLangs[index].name = e.target.value;
-                                    updateField('languages', newLangs);
+                                    const newCert = [...cvData.certifications];
+                                    newCert[index].issuer = e.target.value;
+                                    updateField('certifications', newCert);
                                   }}
-                                  placeholder="e.g., English"
                                 />
                               </div>
                               <div className="space-y-2">
-                                <Label>Proficiency Level</Label>
-                                <Select
-                                  value={lang.level}
-                                  onValueChange={(value) => {
-                                    const newLangs = [...cvData.languages];
-                                    newLangs[index].level = value;
-                                    updateField('languages', newLangs);
+                                <Label>Date</Label>
+                                <Input
+                                  value={cert.date}
+                                  onChange={(e) => {
+                                    const newCert = [...cvData.certifications];
+                                    newCert[index].date = e.target.value;
+                                    updateField('certifications', newCert);
                                   }}
-                                >
-                                  <SelectTrigger>
-                                    <SelectValue placeholder="Select level" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {getProficiencyLevels(cvData).map((level) => (
-                                      <SelectItem key={level.value} value={level.value}>
-                                        {level.label}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
+                                />
                               </div>
                             </div>
-                          </CardContent>
-                        </Card>
-                      ))}
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          updateField('languages', [
-                            ...cvData.languages,
-                            { name: '', level: '' }
-                          ]);
-                        }}
-                      >
-                        <Plus className="mr-2 h-4 w-4" /> Add Language
-                      </Button>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Projects</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                {cvData.projects.map((proj, index) => (
-                  <Card key={index} className="relative">
-                    <CardContent className="pt-6">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2"
-                        onClick={() => {
-                          const newProj = [...cvData.projects];
-                          newProj.splice(index, 1);
-                          updateField('projects', newProj);
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <Label>Project Name</Label>
-                          <Input
-                            value={proj.name}
-                            onChange={(e) => {
-                              const newProj = [...cvData.projects];
-                              newProj[index].name = e.target.value;
-                              updateField('projects', newProj);
-                            }}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Technologies</Label>
-                          <Input
-                            value={proj.technologies}
-                            onChange={(e) => {
-                              const newProj = [...cvData.projects];
-                              newProj[index].technologies = e.target.value;
-                              updateField('projects', newProj);
-                            }}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Description</Label>
-                          <Textarea
-                            value={proj.description}
-                            onChange={(e) => {
-                              const newProj = [...cvData.projects];
-                              newProj[index].description = e.target.value;
-                              updateField('projects', newProj);
-                            }}
-                            rows={3}
-                          />
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    updateField('projects', [
-                      ...cvData.projects,
-                      { name: '', technologies: '', description: '' }
-                    ]);
-                  }}
-                >
-                  <Plus className="mr-2 h-4 w-4" /> Add Project
-                </Button>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle>Certifications</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                {cvData.certifications.map((cert, index) => (
-                  <Card key={index} className="relative">
-                    <CardContent className="pt-6">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="absolute top-2 right-2"
-                        onClick={() => {
-                          const newCert = [...cvData.certifications];
-                          newCert.splice(index, 1);
-                          updateField('certifications', newCert);
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                      <div className="space-y-4">
-                        <div className="space-y-2">
-                          <Label>Certification Name</Label>
-                          <Input
-                            value={cert.name}
-                            onChange={(e) => {
-                              const newCert = [...cvData.certifications];
-                              newCert[index].name = e.target.value;
-                              updateField('certifications', newCert);
-                            }}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label>Issuer</Label>
-                            <Input
-                              value={cert.issuer}
-                              onChange={(e) => {
-                                const newCert = [...cvData.certifications];
-                                newCert[index].issuer = e.target.value;
-                                updateField('certifications', newCert);
-                              }}
-                            />
                           </div>
-                          <div className="space-y-2">
-                            <Label>Date</Label>
-                            <Input
-                              value={cert.date}
-                              onChange={(e) => {
-                                const newCert = [...cvData.certifications];
-                                newCert[index].date = e.target.value;
-                                updateField('certifications', newCert);
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    updateField('certifications', [
-                      ...cvData.certifications,
-                      { name: '', issuer: '', date: '' }
-                    ]);
-                  }}
-                >
-                  <Plus className="mr-2 h-4 w-4" /> Add Certification
-                </Button>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardContent className="pt-6">
-                      <div className="space-y-4">
-                        <Button
-                          onClick={generateCV}
-                          disabled={isGenerating}
-                          className="w-full"
-                          size="lg"
-                        >
-                          {isGenerating ? 'Generating...' : 'Generate CV (PDF + DOCX + LaTeX)'}
-                        </Button>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="outline"
-                            onClick={() => downloadFile('pdf')}
-                            className="flex-1"
-                          >
-                            <Download className="mr-2 h-4 w-4" /> PDF
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => downloadFile('docx')}
-                            className="flex-1"
-                          >
-                            <Download className="mr-2 h-4 w-4" /> DOCX
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => downloadFile('latex')}
-                            className="flex-1"
-                          >
-                            <Download className="mr-2 h-4 w-4" /> LaTeX
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        updateField('certifications', [
+                          ...cvData.certifications,
+                          { name: '', issuer: '', date: '' }
+                        ]);
+                      }}
+                    >
+                      <Plus className="mr-2 h-4 w-4" /> Add Certification
+                    </Button>
+                  </CardContent>
+                </Card>
               </TabsContent>
 
               <TabsContent value="labels">
@@ -1296,15 +1195,6 @@ export default function Home() {
                           placeholder={getLabel(cvData, 'technologies')}
                         />
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="labelGPA">GPA</Label>
-                        <Input
-                          id="labelGPA"
-                          value={cvData.customLabels?.gpa || ''}
-                          onChange={(e) => updateField('customLabels', { ...cvData.customLabels, gpa: e.target.value })}
-                          placeholder={getLabel(cvData, 'gpa')}
-                        />
-                      </div>
                     </div>
                     <Button
                       variant="outline"
@@ -1320,7 +1210,6 @@ export default function Home() {
                         phone: '',
                         address: '',
                         technologies: '',
-                        gpa: '',
                       })}
                     >
                       Reset All Labels
@@ -1562,6 +1451,12 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
     return defaultColor || '';
   };
 
+  // Helper function to render Markdown content as HTML
+  const renderMarkdown = (markdown: string) => {
+    if (!markdown) return '';
+    return markdownToHtml(markdown);
+  };
+
   // Get styling colors with defaults
   const bgColor = getRgbColor(cvData.styling?.backgroundColor, 'rgb(255, 255, 255)');
   const mainBgColor = getRgbColor(cvData.styling?.mainContentBackgroundColor, 'rgb(255, 255, 255)');
@@ -1587,7 +1482,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
               </div>
             )}
             {cvData.fullName && (
-              <h1 className="text-xl font-bold text-center mb-4">{cvData.fullName}</h1>
+              <h1 className="text-xl font-bold text-center mb-4 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cvData.fullName) }} />
             )}
             {cvData.currentJob && (
               <p className="text-sm text-center mb-4" style={{ color: sidebarTextColor, opacity: 0.8 }}>{cvData.currentJob}</p>
@@ -1625,7 +1520,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
             {cvData.summary && (
               <div className="mb-4">
                 <h2 className="text-lg font-bold mb-2 pb-1" style={{ borderBottomColor: accentColor, borderBottomWidth: '2px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'professionalSummary')}</h2>
-                <p className="text-sm whitespace-pre-line">{cvData.summary}</p>
+                <p className="text-sm whitespace-pre-line markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cvData.summary) }} />
               </div>
             )}
 
@@ -1634,12 +1529,12 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-lg font-bold mb-2 pb-1" style={{ borderBottomColor: accentColor, borderBottomWidth: '2px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'workExperience')}</h2>
                 {cvData.experience.map((exp, i) => (
                   <div key={i} className="mb-3">
-                    <div className="font-bold text-sm">{exp.title}</div>
+                    <div className="font-bold text-sm markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(exp.title) }} />
                     <div className="text-xs text-gray-600 italic mb-1">
                       {[exp.company, exp.location, exp.startDate && exp.endDate ? `${exp.startDate} - ${exp.endDate}` : ''].filter(Boolean).join(' | ')}
                     </div>
                     {exp.description && (
-                      <p className="text-xs whitespace-pre-line">{exp.description}</p>
+                      <p className="text-xs whitespace-pre-line markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(exp.description) }} />
                     )}
                   </div>
                 ))}
@@ -1651,12 +1546,12 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-lg font-bold mb-2 pb-1" style={{ borderBottomColor: accentColor, borderBottomWidth: '2px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'education')}</h2>
                 {cvData.education.map((edu, i) => (
                   <div key={i} className="mb-2">
-                    <div className="font-bold text-sm">{edu.degree}</div>
+                    <div className="font-bold text-sm markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(edu.degree) }} />
                     <div className="text-xs text-gray-600 italic">
-                      {[edu.institution, edu.location, edu.year, edu.gpa ? `GPA: ${edu.gpa}` : ''].filter(Boolean).join(' | ')}
+                      {[edu.institution, edu.location, edu.year].filter(Boolean).join(' | ')}
                     </div>
                     {edu.description && (
-                      <p className="text-xs whitespace-pre-line mt-1">{edu.description}</p>
+                      <p className="text-xs whitespace-pre-line mt-1 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(edu.description) }} />
                     )}
                   </div>
                 ))}
@@ -1668,12 +1563,12 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-lg font-bold mb-2 pb-1" style={{ borderBottomColor: accentColor, borderBottomWidth: '2px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'projects')}</h2>
                 {cvData.projects.map((proj, i) => (
                   <div key={i} className="mb-3">
-                    <div className="font-bold text-sm">{proj.name}</div>
+                    <div className="font-bold text-sm markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(proj.name) }} />
                     {proj.technologies && (
                       <div className="text-xs text-gray-600 italic mb-1">{getLabel(cvData, 'technologies')}: {proj.technologies}</div>
                     )}
                     {proj.description && (
-                      <p className="text-xs whitespace-pre-line">{proj.description}</p>
+                      <p className="text-xs whitespace-pre-line markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(proj.description) }} />
                     )}
                   </div>
                 ))}
@@ -1685,7 +1580,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-lg font-bold mb-2 pb-1" style={{ borderBottomColor: accentColor, borderBottomWidth: '2px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'certifications')}</h2>
                 {cvData.certifications.map((cert, i) => (
                   <div key={i} className="text-xs mb-1">
-                    {[cert.name, cert.issuer, cert.date ? `(${cert.date})` : ''].filter(Boolean).join(' - ')}
+                    <span className="markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cert.name) }} /> {cert.issuer && `- ${cert.issuer}`} {cert.date ? `(${cert.date})` : ''}
                   </div>
                 ))}
               </div>
@@ -1710,7 +1605,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
           )}
           <div className="flex-1">
             {cvData.fullName && (
-              <h1 className="text-3xl font-bold mb-2 text-gray-900">{cvData.fullName}</h1>
+              <h1 className="text-3xl font-bold mb-2 text-gray-900 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cvData.fullName) }} />
             )}
             {cvData.currentJob && (
               <p className="text-lg text-gray-600 mb-3">{cvData.currentJob}</p>
@@ -1728,7 +1623,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
         {cvData.summary && (
           <div className="mb-6">
             <h2 className="text-xl font-bold mb-3 text-gray-900">{getLabel(cvData, 'professionalSummary')}</h2>
-            <p className="text-sm leading-relaxed text-gray-700 whitespace-pre-line">{cvData.summary}</p>
+            <p className="text-sm leading-relaxed text-gray-700 whitespace-pre-line markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cvData.summary) }} />
           </div>
         )}
 
@@ -1739,12 +1634,12 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-xl font-bold mb-3 text-gray-900 pl-3" style={{ borderLeftColor: accentColor, borderLeftWidth: '4px', borderLeftStyle: 'solid' }}>{getLabel(cvData, 'workExperience')}</h2>
                 {cvData.experience.map((exp, i) => (
                   <div key={i} className="mb-4">
-                    <div className="font-bold text-sm text-gray-900">{exp.title}</div>
+                    <div className="font-bold text-sm text-gray-900 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(exp.title) }} />
                     <div className="text-xs text-gray-600 mb-1">
                       {[exp.company, exp.location, exp.startDate && exp.endDate ? `${exp.startDate} - ${exp.endDate}` : ''].filter(Boolean).join(' • ')}
                     </div>
                     {exp.description && (
-                      <p className="text-xs text-gray-700 mt-1 whitespace-pre-line">{exp.description}</p>
+                      <p className="text-xs text-gray-700 mt-1 whitespace-pre-line markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(exp.description) }} />
                     )}
                   </div>
                 ))}
@@ -1756,12 +1651,12 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-xl font-bold mb-3 text-gray-900 pl-3" style={{ borderLeftColor: accentColor, borderLeftWidth: '4px', borderLeftStyle: 'solid' }}>{getLabel(cvData, 'education')}</h2>
                 {cvData.education.map((edu, i) => (
                   <div key={i} className="mb-3">
-                    <div className="font-bold text-sm text-gray-900">{edu.degree}</div>
+                    <div className="font-bold text-sm text-gray-900 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(edu.degree) }} />
                     <div className="text-xs text-gray-600">
-                      {[edu.institution, edu.location, edu.year, edu.gpa ? `GPA: ${edu.gpa}` : ''].filter(Boolean).join(' • ')}
+                      {[edu.institution, edu.location, edu.year].filter(Boolean).join(' • ')}
                     </div>
                     {edu.description && (
-                      <p className="text-xs text-gray-700 mt-1 whitespace-pre-line">{edu.description}</p>
+                      <p className="text-xs text-gray-700 mt-1 whitespace-pre-line markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(edu.description) }} />
                     )}
                   </div>
                 ))}
@@ -1782,12 +1677,12 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-xl font-bold mb-3 text-gray-900 pl-3" style={{ borderLeftColor: accentColor, borderLeftWidth: '4px', borderLeftStyle: 'solid' }}>{getLabel(cvData, 'projects')}</h2>
                 {cvData.projects.map((proj, i) => (
                   <div key={i} className="mb-3">
-                    <div className="font-bold text-sm text-gray-900">{proj.name}</div>
+                    <div className="font-bold text-sm text-gray-900 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(proj.name) }} />
                     {proj.technologies && (
                       <div className="text-xs text-gray-600 mb-1">{getLabel(cvData, 'technologies')}: {proj.technologies}</div>
                     )}
                     {proj.description && (
-                      <p className="text-xs text-gray-700 mt-1 whitespace-pre-line">{proj.description}</p>
+                      <p className="text-xs text-gray-700 mt-1 whitespace-pre-line markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(proj.description) }} />
                     )}
                   </div>
                 ))}
@@ -1799,7 +1694,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-xl font-bold mb-3 text-gray-900 pl-3" style={{ borderLeftColor: accentColor, borderLeftWidth: '4px', borderLeftStyle: 'solid' }}>{getLabel(cvData, 'certifications')}</h2>
                 {cvData.certifications.map((cert, i) => (
                   <div key={i} className="text-xs text-gray-700 mb-1">
-                    {[cert.name, cert.issuer, cert.date ? `(${cert.date})` : ''].filter(Boolean).join(' - ')}
+                    <span className="markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cert.name) }} /> {cert.issuer && `- ${cert.issuer}`} {cert.date ? `(${cert.date})` : ''}
                   </div>
                 ))}
               </div>
@@ -1826,7 +1721,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
     return (
       <div className="text-black p-4 rounded-lg min-h-[800px] text-xs" style={{ backgroundColor: mainBgColor }}>
         {cvData.fullName && (
-          <h1 className="text-xl font-bold text-center mb-1">{cvData.fullName}</h1>
+          <h1 className="text-xl font-bold text-center mb-1 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cvData.fullName) }} />
         )}
         <div className="text-xs text-center text-gray-600 mb-3 pb-1" style={{ borderBottomColor: lineSplitterColor, borderBottomWidth: '1px', borderBottomStyle: 'solid' }}>
           {[
@@ -1852,7 +1747,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
         {cvData.summary && (
           <div className="mb-3">
             <h2 className="text-sm font-bold mb-1 pb-0.5" style={{ borderBottomColor: lineSplitterColor, borderBottomWidth: '1px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'professionalSummary')}</h2>
-            <p className="text-xs leading-tight whitespace-pre-line">{cvData.summary}</p>
+            <p className="text-xs leading-tight whitespace-pre-line markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cvData.summary) }} />
           </div>
         )}
 
@@ -1863,12 +1758,12 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-sm font-bold mb-1 pb-0.5" style={{ borderBottomColor: lineSplitterColor, borderBottomWidth: '1px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'workExperience')}</h2>
                 {cvData.experience.map((exp, i) => (
                   <div key={i} className="mb-2">
-                    <div className="font-bold text-xs">{exp.title}</div>
+                    <div className="font-bold text-xs markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(exp.title) }} />
                     <div className="text-xs text-gray-600">
                       {[exp.company, exp.startDate && exp.endDate ? `${exp.startDate}-${exp.endDate}` : ''].filter(Boolean).join(', ')}
                     </div>
                     {exp.description && (
-                      <p className="text-xs leading-tight mt-0.5">{exp.description}</p>
+                      <p className="text-xs leading-tight mt-0.5 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(exp.description) }} />
                     )}
                   </div>
                 ))}
@@ -1880,12 +1775,12 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-sm font-bold mb-1 pb-0.5" style={{ borderBottomColor: lineSplitterColor, borderBottomWidth: '1px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'education')}</h2>
                 {cvData.education.map((edu, i) => (
                   <div key={i} className="mb-1">
-                    <div className="font-bold text-xs">{edu.degree}</div>
+                    <div className="font-bold text-xs markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(edu.degree) }} />
                     <div className="text-xs text-gray-600">
                       {[edu.institution, edu.year].filter(Boolean).join(', ')}
                     </div>
                     {edu.description && (
-                      <p className="text-xs leading-tight mt-0.5">{edu.description}</p>
+                      <p className="text-xs leading-tight mt-0.5 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(edu.description) }} />
                     )}
                   </div>
                 ))}
@@ -1906,9 +1801,9 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
                 <h2 className="text-sm font-bold mb-1 pb-0.5" style={{ borderBottomColor: lineSplitterColor, borderBottomWidth: '1px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'projects')}</h2>
                 {cvData.projects.map((proj, i) => (
                   <div key={i} className="mb-1">
-                    <div className="font-bold text-xs">{proj.name}</div>
+                    <div className="font-bold text-xs markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(proj.name) }} />
                     {proj.description && (
-                      <p className="text-xs leading-tight">{proj.description}</p>
+                      <p className="text-xs leading-tight markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(proj.description) }} />
                     )}
                   </div>
                 ))}
@@ -1957,7 +1852,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
       )}
 
       {cvData.fullName && (
-        <h1 className="text-2xl font-bold text-center mb-2">{cvData.fullName}</h1>
+        <h1 className="text-2xl font-bold text-center mb-2 markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cvData.fullName) }} />
       )}
       <div className="text-xs text-center text-gray-600 mb-4 pb-2" style={{ borderBottomColor: lineSplitterColor, borderBottomWidth: '1px', borderBottomStyle: 'solid' }}>
         {[
@@ -1983,7 +1878,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
       {cvData.summary && (
         <div className="mb-4">
           <h2 className="text-lg font-bold mb-2 pb-1" style={{ borderBottomColor: accentColor, borderBottomWidth: '2px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'professionalSummary')}</h2>
-          <p className="text-sm whitespace-pre-line">{cvData.summary}</p>
+          <p className="text-sm whitespace-pre-line markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(cvData.summary) }} />
         </div>
       )}
 
@@ -1992,7 +1887,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
           <h2 className="text-lg font-bold mb-2 pb-1" style={{ borderBottomColor: accentColor, borderBottomWidth: '2px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'workExperience')}</h2>
           {cvData.experience.map((exp, i) => (
             <div key={i} className="mb-3">
-              <div className="font-bold text-sm">{exp.title}</div>
+              <div className="font-bold text-sm markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(exp.title) }} />
               <div className="text-xs text-gray-600 italic mb-1">
                 {[exp.company, exp.location, exp.startDate && exp.endDate ? `${exp.startDate} - ${exp.endDate}` : ''].filter(Boolean).join(' | ')}
               </div>
@@ -2009,9 +1904,9 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
           <h2 className="text-lg font-bold mb-2 pb-1" style={{ borderBottomColor: accentColor, borderBottomWidth: '2px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'education')}</h2>
           {cvData.education.map((edu, i) => (
             <div key={i} className="mb-2">
-              <div className="font-bold text-sm">{edu.degree}</div>
+              <div className="font-bold text-sm markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(edu.degree) }} />
               <div className="text-xs text-gray-600 italic">
-                {[edu.institution, edu.location, edu.year, edu.gpa ? `${getLabel(cvData, 'gpa')}: ${edu.gpa}` : ''].filter(Boolean).join(' | ')}
+                {[edu.institution, edu.location, edu.year].filter(Boolean).join(' | ')}
               </div>
               {edu.description && (
                 <p className="text-xs whitespace-pre-line mt-1">{edu.description}</p>
@@ -2033,7 +1928,7 @@ function PreviewContent({ cvData }: { cvData: CvData }) {
           <h2 className="text-lg font-bold mb-2 pb-1" style={{ borderBottomColor: accentColor, borderBottomWidth: '2px', borderBottomStyle: 'solid' }}>{getLabel(cvData, 'projects')}</h2>
           {cvData.projects.map((proj, i) => (
             <div key={i} className="mb-3">
-              <div className="font-bold text-sm">{proj.name}</div>
+              <div className="font-bold text-sm markdown-content" dangerouslySetInnerHTML={{ __html: renderMarkdown(proj.name) }} />
               {proj.technologies && (
                 <div className="text-xs text-gray-600 italic mb-1">{getLabel(cvData, 'technologies')}: {proj.technologies}</div>
               )}

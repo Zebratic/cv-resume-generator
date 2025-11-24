@@ -23,8 +23,7 @@ describe('PDF Generator', () => {
         degree: 'BS Computer Science',
         institution: 'University',
         location: 'City',
-        year: '2018',
-        gpa: '3.8'
+        year: '2018'
       }
     ],
     skills: ['JavaScript', 'Python'],

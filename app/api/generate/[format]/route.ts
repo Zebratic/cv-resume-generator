@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 const pdfGenerator = require('@/generators/pdfGenerator');
-const docxGenerator = require('@/generators/docxGenerator');
-const latexGenerator = require('@/generators/latexGenerator');
 
 export async function POST(
   request: NextRequest,
@@ -28,16 +26,6 @@ export async function POST(
         buffer = await pdfGenerator.generate(cvData);
         contentType = 'application/pdf';
         filename = `${nameBase}_CV.pdf`;
-        break;
-      case 'docx':
-        buffer = await docxGenerator.generate(cvData);
-        contentType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-        filename = `${nameBase}_CV.docx`;
-        break;
-      case 'latex':
-        buffer = latexGenerator.generate(cvData);
-        contentType = 'text/plain';
-        filename = `${nameBase}_CV.tex`;
         break;
       default:
         return NextResponse.json(

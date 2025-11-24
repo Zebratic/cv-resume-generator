@@ -68,3 +68,69 @@
   }
 }
 
+/* Markdown header styles for preview */
+.markdown-content h1,
+[class*="markdown"] h1 {
+  font-size: 2em;
+  font-weight: bold;
+  margin: 0.5em 0;
+  line-height: 1.2;
+}
+
+.markdown-content h2,
+[class*="markdown"] h2 {
+  font-size: 1.6em;
+  font-weight: bold;
+  margin: 0.5em 0;
+  line-height: 1.2;
+}
+
+.markdown-content h3,
+[class*="markdown"] h3 {
+  font-size: 1.3em;
+  font-weight: bold;
+  margin: 0.5em 0;
+  line-height: 1.2;
+}
+
+.markdown-content h4,
+[class*="markdown"] h4 {
+  font-size: 1.1em;
+  font-weight: bold;
+  margin: 0.5em 0;
+  line-height: 1.2;
+}
+
+/* Also style headers in preview content areas */
+[class*="preview"] h1,
+[class*="Preview"] h1 {
+  font-size: 2em !important;
+  font-weight: bold;
+  margin: 0.5em 0;
+  line-height: 1.2;
+}
+
+[class*="preview"] h2,
+[class*="Preview"] h2 {
+  font-size: 1.6em !important;
+  font-weight: bold;
+  margin: 0.5em 0;
+  line-height: 1.2;
+}
+
+[class*="preview"] h3,
+[class*="Preview"] h3 {
+  font-size: 1.3em !important;
+  font-weight: bold;
+  margin: 0.5em 0;
+  line-height: 1.2;
+}
+
+[class*="preview"] h4,
+[class*="Preview"] h4 {
+  font-size: 1.1em !important;
+  font-weight: bold;
+  margin: 0.5em 0;
+  line-height: 1.2;
+}
+
