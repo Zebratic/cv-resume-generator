@@ -55,8 +55,15 @@ echo -e "${GREEN}✓ PM2 installed${NC}"
 # Create application user if it doesn't exist
 if ! id "$APP_USER" &>/dev/null; then
     echo -e "${YELLOW}👤 Creating application user...${NC}"
-    useradd -r -s /bin/bash -d "$APP_DIR" -m "$APP_USER" || true
+    useradd -r -s /bin/bash "$APP_USER" || true
 fi
+
+# Create application directory and set ownership
+if [ ! -d "$APP_DIR" ]; then
+    echo -e "${YELLOW}📁 Creating application directory...${NC}"
+    mkdir -p "$APP_DIR"
+fi
+chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 # Clone or update repository
 if [ -d "$APP_DIR/.git" ]; then
@@ -66,13 +73,16 @@ if [ -d "$APP_DIR/.git" ]; then
     sudo -u "$APP_USER" git reset --hard origin/main
 else
     echo -e "${YELLOW}📥 Cloning repository...${NC}"
+    # Remove directory if it exists but isn't a git repo
     if [ -d "$APP_DIR" ]; then
         rm -rf "$APP_DIR"
     fi
-    sudo -u "$APP_USER" git clone "$REPO_URL" "$APP_DIR"
+    # Clone as root first, then fix ownership
+    git clone "$REPO_URL" "$APP_DIR"
+    chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 fi
 
-# Set ownership
+# Ensure ownership is correct
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 # Install dependencies
